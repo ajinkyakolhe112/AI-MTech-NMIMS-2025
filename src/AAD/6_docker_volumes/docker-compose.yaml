@@ -1,0 +1,12 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5003:5003"
+    volumes:
+      - local_directory:/mounted_directory_in_container
+
+volumes:
+  local_directory:
+
+# docker-compose up --build

@@ -1,0 +1,8 @@
+services:
+  web:
+    build: .
+    image: docker_container_lab1
+    ports:
+      - "5002:5002"
+
+# docker-compose up --build

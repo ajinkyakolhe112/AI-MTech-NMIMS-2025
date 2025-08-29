@@ -1,0 +1,6 @@
+- `kubectl apply -f nginx_deployment.yaml`
+- `kubectl apply -f nginx-_nodeport.yaml`
+- `kubectl apply -f nginix_clusterip.yaml`
+- `kubectl apply -f nginx_-_loadbalancer.yaml`
+- `kubectl get pods`
+- `kubectl get svc` # to get all different runnning services
