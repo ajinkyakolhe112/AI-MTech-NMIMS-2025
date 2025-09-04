@@ -90,14 +90,20 @@ def train_generator(generator, discriminator, real_images_batch, optimizer_gener
     random_noise = torch.randn(batch_size, generator.noise_dimension, device=accelerator.device)
     generated_fake_images = generator(random_noise)
     
-    # Step 2: Try to fool discriminator (we want it to say these fakes are real)
-    discriminator_opinion_on_fakes = discriminator(generated_fake_images)
-    target_labels_real = torch.ones_like(discriminator_opinion_on_fakes)  # We want 1s (real)
+    # Step 2: Ask discriminator: "Are these fake images real?"
+    discriminator_scores_on_fake_images = discriminator(generated_fake_images)
     
-    # Step 3: Calculate loss and update generator
+    # Step 3: Generator wants discriminator to say "YES, these are REAL" (score = 1.0)
+    # So we create target labels of 1.0 (meaning "real") for all fake images
+    what_we_want_discriminator_to_say = torch.ones_like(discriminator_scores_on_fake_images)  # All 1s = "real"
+    
+    # Step 4: Calculate generator loss
+    # If discriminator says fake images are fake (score near 0), loss will be HIGH
+    # If discriminator says fake images are real (score near 1), loss will be LOW
     loss_function = nn.BCELoss()
-    generator_loss = loss_function(discriminator_opinion_on_fakes, target_labels_real)
+    generator_loss = loss_function(discriminator_scores_on_fake_images, what_we_want_discriminator_to_say)
     
+    # Step 5: Update generator to make better fake images
     optimizer_generator.zero_grad()
     accelerator.backward(generator_loss)
     optimizer_generator.step()
@@ -106,25 +112,47 @@ def train_generator(generator, discriminator, real_images_batch, optimizer_gener
 
 
 def train_discriminator(generator, discriminator, real_images_batch, optimizer_discriminator, accelerator):
-    """Train discriminator to correctly identify real vs fake images"""
+    """
+    Train discriminator to correctly identify real vs fake images
+    
+    GOAL: Discriminator should output 1.0 for real images, 0.0 for fake images
+    """
     batch_size = real_images_batch.size(0)
     loss_function = nn.BCELoss()
     
-    # Step 1: Train on REAL images (should output 1)
-    discriminator_opinion_on_real = discriminator(real_images_batch)
-    target_labels_real = torch.ones_like(discriminator_opinion_on_real)
-    loss_on_real_images = loss_function(discriminator_opinion_on_real, target_labels_real)
+    # ========== PART 1: Train on REAL images ==========
+    # Ask discriminator: "Are these real MNIST images real?"
+    discriminator_scores_on_real_images = discriminator(real_images_batch)
     
-    # Step 2: Train on FAKE images (should output 0)
+    # We want discriminator to say "YES, these are REAL" (score = 1.0)
+    correct_answer_for_real_images = torch.ones_like(discriminator_scores_on_real_images)  # All 1s = "real"
+    
+    # Calculate loss: How wrong was the discriminator about real images?
+    # If discriminator says real images are real (score near 1), loss will be LOW ✓
+    # If discriminator says real images are fake (score near 0), loss will be HIGH ✗
+    loss_when_looking_at_real_images = loss_function(discriminator_scores_on_real_images, correct_answer_for_real_images)
+    
+    # ========== PART 2: Train on FAKE images ==========
+    # Generate some fake images
     random_noise = torch.randn(batch_size, generator.noise_dimension, device=accelerator.device)
-    generated_fake_images = generator(random_noise).detach()  # Don't update generator
-    discriminator_opinion_on_fakes = discriminator(generated_fake_images)
-    target_labels_fake = torch.zeros_like(discriminator_opinion_on_fakes)
-    loss_on_fake_images = loss_function(discriminator_opinion_on_fakes, target_labels_fake)
+    generated_fake_images = generator(random_noise).detach()  # .detach() = don't update generator
     
-    # Step 3: Combined discriminator loss
-    total_discriminator_loss = (loss_on_real_images + loss_on_fake_images) / 2
+    # Ask discriminator: "Are these generator-made images real?"
+    discriminator_scores_on_fake_images = discriminator(generated_fake_images)
     
+    # We want discriminator to say "NO, these are FAKE" (score = 0.0)
+    correct_answer_for_fake_images = torch.zeros_like(discriminator_scores_on_fake_images)  # All 0s = "fake"
+    
+    # Calculate loss: How wrong was the discriminator about fake images?
+    # If discriminator says fake images are fake (score near 0), loss will be LOW ✓
+    # If discriminator says fake images are real (score near 1), loss will be HIGH ✗
+    loss_when_looking_at_fake_images = loss_function(discriminator_scores_on_fake_images, correct_answer_for_fake_images)
+    
+    # ========== PART 3: Combine both losses ==========
+    # Total loss = average of both mistakes
+    total_discriminator_loss = (loss_when_looking_at_real_images + loss_when_looking_at_fake_images) / 2
+    
+    # Update discriminator to be better at detecting real vs fake
     optimizer_discriminator.zero_grad()
     accelerator.backward(total_discriminator_loss)
     optimizer_discriminator.step()
