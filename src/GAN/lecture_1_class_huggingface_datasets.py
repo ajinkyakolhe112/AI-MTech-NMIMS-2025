@@ -11,37 +11,37 @@ from datasets import load_dataset
 from torchvision import transforms
 from accelerate import Accelerator
 
-def load_mnist_data():
+def load_mnist_classification_data():
     """Load MNIST dataset from Hugging Face"""
     # Load the dataset from the Hugging Face Hub
-    dataset = load_dataset("mnist")
+    mnist_dataset = load_dataset("mnist")
 
     # Define a transformation to convert images to PyTorch tensors
-    transform = transforms.Compose([transforms.ToTensor()])
+    image_to_tensor_transform = transforms.Compose([transforms.ToTensor()])
 
-    def apply_transforms(examples):
+    def apply_transforms_to_batch(batch_examples):
         # Apply the tensor conversion
-        for img in examples['image']:
-            img = img.convert("RGB")
-            img = transform(img)
-            examples['pixel_values'].append(img)
+        for image in batch_examples['image']:
+            image = image.convert("RGB")
+            image_tensor = image_to_tensor_transform(image)
+            batch_examples['pixel_values'].append(image_tensor)
         
-        return examples
+        return batch_examples
 
     # Apply the transformation to the entire dataset
-    processed_dataset = dataset.with_transform(apply_transforms)
+    processed_mnist_dataset = mnist_dataset.with_transform(apply_transforms_to_batch)
     
     # Create DataLoaders
-    train_loader = DataLoader(processed_dataset['train'], batch_size=64, shuffle=True)
-    test_loader = DataLoader(processed_dataset['test'], batch_size=64, shuffle=False)
+    train_dataloader = DataLoader(processed_mnist_dataset['train'], batch_size=64, shuffle=True)
+    test_dataloader = DataLoader(processed_mnist_dataset['test'], batch_size=64, shuffle=False)
     
-    return train_loader, test_loader
+    return train_dataloader, test_dataloader
 
-class SimpleNeuralNet(nn.Module):
-    """Simple MLP: 784 → 128 → 64 → 10"""
+class DigitClassificationNetwork(nn.Module):
+    """Neural network for classifying MNIST digits: 784 → 128 → 64 → 10"""
     def __init__(self):
         super().__init__()
-        self.layers = nn.Sequential(
+        self.classification_layers = nn.Sequential(
             nn.Flatten(),
             nn.Linear(784, 128),
             nn.ReLU(),
@@ -49,59 +49,62 @@ class SimpleNeuralNet(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 10)
         )
+        print("Created classification network: 784 -> 128 -> 64 -> 10")
     
-    def forward(self, x):
-        return self.layers(x)
+    def forward(self, input_images):
+        classification_logits = self.classification_layers(input_images)
+        return classification_logits
 
-def train_model(model, train_loader, optimizer, accelerator, epochs=3):
+def train_classification_model(model, train_dataloader, optimizer, accelerator, epochs=3):
     """Training loop simplified with Accelerate"""
-    criterion = nn.CrossEntropyLoss()
+    loss_function = nn.CrossEntropyLoss()
     
     model.train()
-    for epoch in range(epochs):
-        total_loss = 0
-        for batch in train_loader:
+    for current_epoch in range(epochs):
+        total_training_loss = 0
+        for data_batch in train_dataloader:
             # Data is automatically moved to the correct device by Accelerate
-            x_batch = batch['pixel_values']
-            y_batch = batch['label']
+            batch_images = data_batch['pixel_values']
+            batch_labels = data_batch['label']
             
             # Forward pass
-            predictions = model(x_batch)
-            loss = criterion(predictions, y_batch)
+            predicted_logits = model(batch_images)
+            training_loss = loss_function(predicted_logits, batch_labels)
             
             # Backward pass
             optimizer.zero_grad()
-            accelerator.backward(loss)
+            accelerator.backward(training_loss)
             optimizer.step()
             
-            total_loss += loss.item()
+            total_training_loss += training_loss.item()
         
-        avg_loss = total_loss / len(train_loader)
+        average_training_loss = total_training_loss / len(train_dataloader)
         # accelerator.print only prints on the main process
-        accelerator.print(f'Epoch {epoch+1}: Average Loss = {avg_loss:.4f}')
+        accelerator.print(f'Epoch {current_epoch+1}: Average Loss = {average_training_loss:.4f}')
 
-def test_model(model, test_loader):
+def evaluate_classification_model(model, test_dataloader):
     """Evaluate model accuracy (simplified for this example)"""
     model.eval()
-    correct = 0
-    total = 0
+    total_correct_predictions = 0
+    total_test_samples = 0
     
     with torch.no_grad():
-        for batch in test_loader:
+        for test_batch in test_dataloader:
             # Accelerate handles moving the batch to the correct device
-            x_batch = batch['pixel_values']
-            y_batch = batch['label']
+            test_images = test_batch['pixel_values']
+            test_labels = test_batch['label']
 
-            predictions = model(x_batch)
+            test_predictions_logits = model(test_images)
             
             # Note: In a true multi-GPU setup, this accuracy is only for one process.
             # For robust evaluation, one would use accelerator.gather_for_metrics().
-            accuracy = torchmetrics.functional.accuracy(predictions, y_batch, task='multiclass', num_classes=10)
-            correct += accuracy.item() * len(y_batch)
-            total += len(y_batch)
+            batch_accuracy = torchmetrics.functional.accuracy(test_predictions_logits, test_labels, task='multiclass', num_classes=10)
+            total_correct_predictions += batch_accuracy.item() * len(test_labels)
+            total_test_samples += len(test_labels)
     
-    if total > 0:
-        print(f'Test Accuracy: {(correct/total)*100:.2f}%')
+    if total_test_samples > 0:
+        final_test_accuracy = (total_correct_predictions/total_test_samples)*100
+        print(f'Test Accuracy: {final_test_accuracy:.2f}%')
     else:
         print('Test Accuracy: 0.00% (No data evaluated)')
 
@@ -109,21 +112,26 @@ def test_model(model, test_loader):
 if __name__ == "__main__":
     # Initialize Accelerator
     accelerator = Accelerator()
+    accelerator.print("Starting MNIST Digit Classification with Hugging Face datasets")
 
     # Load data
-    train_loader, test_loader = load_mnist_data()
+    train_dataloader, test_dataloader = load_mnist_classification_data()
+    accelerator.print(f"Loaded MNIST from HuggingFace: {len(train_dataloader)} train batches, {len(test_dataloader)} test batches")
     
     # Create model and optimizer
-    model = SimpleNeuralNet()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+    classification_model = DigitClassificationNetwork()
+    model_optimizer = torch.optim.SGD(classification_model.parameters(), lr=0.01)
     
     # Prepare everything with Accelerate
-    model, optimizer, train_loader, test_loader = accelerator.prepare(
-        model, optimizer, train_loader, test_loader
+    classification_model, model_optimizer, train_dataloader, test_dataloader = accelerator.prepare(
+        classification_model, model_optimizer, train_dataloader, test_dataloader
     )
 
-    accelerator.print(f'Model has {sum(p.numel() for p in model.parameters())} parameters')
+    total_parameters = sum(p.numel() for p in classification_model.parameters())
+    accelerator.print(f'Model has {total_parameters:,} parameters')
     
     # Train and evaluate the model
-    train_model(model, train_loader, optimizer, accelerator)
-    test_model(model, test_loader)
+    train_classification_model(classification_model, train_dataloader, model_optimizer, accelerator)
+    evaluate_classification_model(classification_model, test_dataloader)
+    
+    accelerator.print("Training and evaluation completed!")
