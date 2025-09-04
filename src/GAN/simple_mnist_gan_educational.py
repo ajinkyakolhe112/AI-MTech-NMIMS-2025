@@ -308,7 +308,7 @@ def main():
     overfit_single_batch_gan(generator, discriminator, train_dataloader, accelerator, iterations=500)
     
     # Uncomment the line below to run full training instead:
-    # train_gan(generator, discriminator, train_dataloader, accelerator, epochs=100)
+    train_gan(generator, discriminator, train_dataloader, accelerator, epochs=2)
     
     accelerator.print("Training completed! Check 'generated_images' folder for results.")
 
