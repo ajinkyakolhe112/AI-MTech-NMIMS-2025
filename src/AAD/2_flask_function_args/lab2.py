@@ -8,7 +8,7 @@ def default_print():
 
 @app.route("/getname", methods = ['GET', 'POST'])
 def get_name():
-    data = request.json()
+    data = request.get_json()
     user_entered_name = str(data['name'])
     print(user_entered_name)
     return jsonify(data)
