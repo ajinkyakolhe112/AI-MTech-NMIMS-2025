@@ -7,4 +7,4 @@ RUN pip install -r requirements.txt
 
 EXPOSE 5002
 
-CMD ["python", "flask_app.py"]
+CMD ["python", "flask_compose.py"]
