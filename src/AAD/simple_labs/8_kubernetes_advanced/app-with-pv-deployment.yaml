@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-pv-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-with-pv
+  template:
+    metadata:
+      labels:
+        app: app-with-pv
+    spec:
+      containers:
+      - name: app-container
+        image: busybox # A simple image to demonstrate writing to a volume
+        command: ["/bin/sh", "-c"]
+        args:
+          - while true; do echo $(date -u) >> /data/output.txt; sleep 5; done
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: /data
+      volumes:
+      - name: persistent-storage
+        persistentVolumeClaim:
+          claimName: my-pvc
